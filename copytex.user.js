@@ -12,6 +12,8 @@
 // @license      MIT
 // @homepageURL  https://github.com/sgt57/copytex
 // @supportURL   https://github.com/sgt57/copytex/issues
+// @downloadURL  https://raw.githubusercontent.com/sgt57/copytex/main/copytex.user.js
+// @updateURL    https://raw.githubusercontent.com/sgt57/copytex/main/copytex.user.js
 // ==/UserScript==
 
 (() => {
