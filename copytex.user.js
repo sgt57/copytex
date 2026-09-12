@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CopyTeX
 // @namespace    copytex
-// @version      0.5.0
+// @version      0.5.1
 // @description  复制网页上的 TeX
 // @match        http://*/*
 // @match        https://*/*
@@ -170,21 +170,30 @@
   let contextFormula = null, contextMenu, sourceDialog;
   function ensureFormulaTools(){if(contextMenu)return; const style=document.createElement('style'); style.textContent='.copytex-context-menu{position:fixed;z-index:2147483647;min-width:150px;padding:4px;background:Canvas;color:CanvasText;box-shadow:0 3px 12px #0003;font:13px system-ui}.copytex-context-menu button{display:block;width:100%;padding:7px 10px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.copytex-context-menu button:hover{background:#e8f0fe}.copytex-source-backdrop{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:20px;background:#0006}.copytex-source-dialog{width:min(720px,100%);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;border-radius:8px;background:Canvas;color:CanvasText}.copytex-source-head{display:flex;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #ddd}.copytex-source-code{margin:0;padding:16px;overflow:auto;white-space:pre-wrap;user-select:text;font:13px/1.5 monospace}';(document.head||document.documentElement).append(style);contextMenu=document.createElement('div');contextMenu.className='copytex-context-menu';contextMenu.hidden=true;const view=document.createElement('button');view.textContent='查看 TeX 源码';view.onclick=()=>{if(contextFormula)openSource(contextFormula.tex);hideMenu()};contextMenu.append(view);document.documentElement.append(contextMenu);document.addEventListener('click',hideMenu);document.addEventListener('keydown',e=>{if(e.key==='Escape'){hideMenu();closeSource()}})}
   function hideMenu(){if(contextMenu)contextMenu.hidden=true;contextFormula=null} function openSource(tex){closeSource();const b=document.createElement('div');b.className='copytex-source-backdrop';const d=document.createElement('section');d.className='copytex-source-dialog';const h=document.createElement('header');h.className='copytex-source-head';h.append('TeX 源码');const x=document.createElement('button');x.textContent='×';x.onclick=closeSource;h.append(x);const p=document.createElement('pre');p.className='copytex-source-code';p.textContent=tex;d.append(h,p);b.append(d);b.onclick=e=>{if(e.target===b)closeSource()};document.documentElement.append(b);sourceDialog=b} function closeSource(){if(sourceDialog){sourceDialog.remove();sourceDialog=null}}
-  window.addEventListener('contextmenu', e => {
-    hideMenu();
-    if (e.defaultPrevented) return;
+  function showFormulaMenu(event) {
+    if (event.defaultPrevented) return;
     const formulas = collectMath();
-    let node = e.target?.nodeType === 1 ? e.target : e.target?.parentElement;
+    let node = event.target?.nodeType === 1 ? event.target : event.target?.parentElement;
     let formula;
     while (node && !formula) { formula = formulas.get(node); node = node.parentElement; }
     if (!formula) return;
     ensureFormulaTools();
     contextFormula = formula;
     contextMenu.hidden = false;
-    contextMenu.style.left = Math.min(e.clientX, innerWidth - contextMenu.offsetWidth - 4) + 'px';
-    contextMenu.style.top = Math.min(e.clientY, innerHeight - contextMenu.offsetHeight - 4) + 'px';
-    e.preventDefault();
-  });
+    contextMenu.style.left = Math.min(event.clientX, innerWidth - contextMenu.offsetWidth - 4) + 'px';
+    contextMenu.style.top = Math.min(event.clientY, innerHeight - contextMenu.offsetHeight - 4) + 'px';
+    event.preventDefault();
+  }
+  window.addEventListener('contextmenu', event => {
+    hideMenu();
+    const fallback = currentEvent => {
+      if (currentEvent !== event) return;
+      window.removeEventListener('contextmenu', fallback);
+      showFormulaMenu(event);
+    };
+    window.addEventListener('contextmenu', fallback);
+    setTimeout(() => window.removeEventListener('contextmenu', fallback), 0);
+  }, true);
   window.addEventListener('copy', event => {
     const selection = getSelection();
     if (!selection?.rangeCount || selection.isCollapsed || !event.clipboardData) return;
