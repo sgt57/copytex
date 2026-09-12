@@ -4,6 +4,10 @@
 
 ## 安装
 
+[GitHub](https://raw.githubusercontent.com/sgt57/copytex/main/copytex.user.js)
+
+[Greasy Fork](https://greasyfork.org/zh-CN/scripts/595476-copytex)
+
 ## 使用
 
 选中文本，按下 Ctrl+C 或右键复制。
