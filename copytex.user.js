@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CopyTeX
 // @namespace    copytex
-// @version      0.3.4
+// @version      0.4.0
 // @description  复制网页上的 TeX
 // @match        http://*/*
 // @match        https://*/*
@@ -51,6 +51,44 @@
       set: value => { api = value; preserveSource(value); }
     });
   }
+
+  // 单独转换的公式不进入 MathJax 的公式列表，在调用时记录源码。
+  const hookedMathJax = new WeakSet();
+  function intercept(object, key, wrap) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (descriptor && (!descriptor.configurable || descriptor.get || descriptor.set)) return;
+    let value = wrap(object[key]);
+    try {
+      Object.defineProperty(object, key, {
+        configurable: true, enumerable: descriptor?.enumerable ?? true,
+        get: () => value,
+        set: next => { value = wrap(next); }
+      });
+    } catch { /* 无法包装时仍可读取已有 DOM 和公式列表。 */ }
+  }
+  function preserveConversions(api) {
+    if (!api || typeof api !== 'object' || hookedMathJax.has(api)) return api;
+    hookedMathJax.add(api);
+    for (const name of ['tex2chtml', 'tex2chtmlPromise']) {
+      intercept(api, name, original => {
+        if (typeof original !== 'function') return original;
+        return function (...args) {
+          const remember = node => {
+            if (node?.nodeType === 1 && typeof args[0] === 'string') {
+              // 写入节点属性，让 cloneNode / outerHTML 重建后仍能读取。
+              node.setAttribute('data-tex', args[0]);
+            }
+            return node;
+          };
+          const output = original.apply(this, args);
+          return name.endsWith('Promise') ? output.then(remember) : remember(output);
+        };
+      });
+    }
+    return api;
+  }
+  preserveConversions(window.MathJax);
+  intercept(window, 'MathJax', preserveConversions);
 
   // 洛谷把 KaTeX 封装在模块内，单独包装其 rehype-katex 插件。
   if (/(^|\.)luogu\.com(\.cn)?$/.test(location.hostname)) {
