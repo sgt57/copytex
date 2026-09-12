@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CopyTeX
 // @namespace    copytex
-// @version      0.3.3
+// @version      0.3.4
 // @description  复制网页上的 TeX
 // @match        http://*/*
 // @match        https://*/*
@@ -131,6 +131,30 @@
     const selection = getSelection();
     if (!selection?.rangeCount || selection.isCollapsed || !event.clipboardData) return;
     if (document.activeElement?.matches('input, textarea') || document.activeElement?.isContentEditable) return;
+    // 按实际显示状态排除隐藏源码副本，不按字符串相同与否删除正文。
+    const styles = new WeakMap(), hidden = new WeakMap();
+    const styleOf = element => {
+      if (!styles.has(element)) styles.set(element, getComputedStyle(element));
+      return styles.get(element);
+    };
+    function hiddenFromCopy(element) {
+      if (!element) return false;
+      if (hidden.has(element)) return hidden.get(element);
+      const style = styleOf(element);
+      const clip = style.clip.match(/^rect\(([^)]+)\)$/)?.[1]
+        .split(/[,\s]+/).map(value => parseFloat(value));
+      const clipped = clip?.length === 4 && clip.every(Number.isFinite)
+        && (clip[2] <= clip[0] || clip[1] <= clip[3]);
+      const tinyHiddenBox = /^(absolute|fixed)$/.test(style.position)
+        && style.overflowX === 'hidden' && style.overflowY === 'hidden'
+        && parseFloat(style.width) <= 1 && parseFloat(style.height) <= 1;
+      const value = style.display === 'none' || style.contentVisibility === 'hidden'
+        || style.opacity === '0' || clipped || tinyHiddenBox
+        || /^inset\(50%\)$/.test(style.clipPath)
+        || hiddenFromCopy(element.parentElement);
+      hidden.set(element, value);
+      return value;
+    }
     const formulas = collectMath();
     if (!formulas.size) return;
     const enclosing = node => {
@@ -166,7 +190,9 @@
       }
       function read(node, preserve = false) {
         if (!range.intersectsNode(node)) return;
-        if (formulas.has(node)) {
+        const element = node.nodeType === 1 ? node : node.parentElement;
+        if (hiddenFromCopy(element)) return;
+        if (formulas.has(node) && styleOf(node).visibility === 'visible') {
           const math = formulas.get(node);
           if (math.display) boundary(2);
           append(math.display ? `$$\n${math.tex}\n$$` : `$${math.tex}$`, true);
@@ -175,16 +201,17 @@
           return;
         }
         if (node.nodeType === 3) {
+          if (styleOf(node.parentElement).visibility !== 'visible') return;
           const value = node.data.slice(
             node === range.startContainer ? range.startOffset : 0,
             node === range.endContainer ? range.endOffset : node.length);
-          append(value, preserve || /^(pre|break-spaces)/.test(getComputedStyle(node.parentElement).whiteSpace));
+          append(value, preserve || /^(pre|break-spaces)/.test(styleOf(node.parentElement).whiteSpace));
           return;
         }
         if (node.nodeType === 1) {
-          if (node.matches('script, style, .katex-mathml, .MathJax_Preview, .MJX_Assistive_MathML, mjx-assistive-mml, [hidden]')) return;
+          if (node.matches('script, style, noscript, template, annotation, annotation-xml, .katex-mathml, .MathJax_Preview, .MJX_Assistive_MathML, mjx-assistive-mml, [hidden]')) return;
           if (node.tagName === 'BR') { append('\n', true); return; }
-          preserve ||= node.tagName === 'PRE' || /^(pre|break-spaces)/.test(getComputedStyle(node).whiteSpace);
+          preserve ||= node.tagName === 'PRE' || /^(pre|break-spaces)/.test(styleOf(node).whiteSpace);
         }
         const lines = /^(P|H[1-6]|BLOCKQUOTE)$/.test(node.tagName) ? 2 : blockTags.test(node.tagName) ? 1 : 0;
         if (lines) boundary(lines);
