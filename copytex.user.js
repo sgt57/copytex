@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CopyTeX
 // @namespace    copytex
-// @version      0.5.2
+// @version      0.5.3
 // @description  复制网页上的 TeX
 // @match        http://*/*
 // @match        https://*/*
@@ -260,7 +260,75 @@
 
   let contextFormula = null, contextMenu, sourceDialog;
   function ensureFormulaTools(){if(contextMenu)return; const style=document.createElement('style'); style.textContent='.copytex-context-menu{position:fixed;z-index:2147483647;min-width:150px;padding:4px;background:Canvas;color:CanvasText;box-shadow:0 3px 12px #0003;font:13px system-ui}.copytex-context-menu button{display:block;width:100%;padding:7px 10px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.copytex-context-menu button:hover{background:#e8f0fe}.copytex-source-backdrop{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:20px;background:#0006}.copytex-source-dialog{width:min(720px,100%);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;border-radius:8px;background:Canvas;color:CanvasText}.copytex-source-head{display:flex;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #ddd}.copytex-source-code{margin:0;padding:16px;overflow:auto;white-space:pre-wrap;user-select:text;font:13px/1.5 monospace}';(document.head||document.documentElement).append(style);contextMenu=document.createElement('div');contextMenu.className='copytex-context-menu';contextMenu.hidden=true;const view=document.createElement('button');view.textContent='查看 TeX 源码';view.onclick=()=>{if(contextFormula)openSource(contextFormula.tex);hideMenu()};contextMenu.append(view);document.documentElement.append(contextMenu);document.addEventListener('click',hideMenu);document.addEventListener('keydown',e=>{if(e.key==='Escape'){hideMenu();closeSource()}})}
-  function hideMenu(){if(contextMenu)contextMenu.hidden=true;contextFormula=null} function openSource(tex){closeSource();const b=document.createElement('div');b.className='copytex-source-backdrop';const d=document.createElement('section');d.className='copytex-source-dialog';const h=document.createElement('header');h.className='copytex-source-head';h.append('TeX 源码');const x=document.createElement('button');x.textContent='×';x.onclick=closeSource;h.append(x);const p=document.createElement('pre');p.className='copytex-source-code';p.textContent=tex;d.append(h,p);b.append(d);b.onclick=e=>{if(e.target===b)closeSource()};document.documentElement.append(b);sourceDialog=b} function closeSource(){if(sourceDialog){sourceDialog.remove();sourceDialog=null}}
+  let sourceCopyText = null;
+  async function copySource(tex, code) {
+    try {
+      await navigator.clipboard.writeText(tex);
+      return;
+    } catch { /* HTTP 页面或剪贴板权限受限时，尝试传统复制。 */ }
+    const selection = getSelection();
+    const ranges = [];
+    for (let i = 0; i < selection.rangeCount; i++) ranges.push(selection.getRangeAt(i).cloneRange());
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    try {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      sourceCopyText = tex;
+      if (!document.execCommand('copy')) throw new Error('Copy failed');
+    } finally {
+      sourceCopyText = null;
+      selection.removeAllRanges();
+      ranges.forEach(saved => selection.addRange(saved));
+    }
+  }
+  function hideMenu(){if(contextMenu)contextMenu.hidden=true;contextFormula=null}
+  function openSource(tex) {
+    closeSource();
+    const b = document.createElement('div');
+    b.className = 'copytex-source-backdrop';
+    const d = document.createElement('section');
+    d.className = 'copytex-source-dialog';
+    const h = document.createElement('header');
+    h.className = 'copytex-source-head';
+    h.append('TeX 源码');
+    const actions = document.createElement('span');
+    actions.style.cssText = 'display:flex;gap:8px;align-items:center';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.textContent = '复制';
+    copy.setAttribute('aria-live', 'polite');
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.setAttribute('aria-label', '关闭');
+    x.onclick = closeSource;
+    actions.append(copy, x);
+    h.append(actions);
+    const p = document.createElement('pre');
+    p.className = 'copytex-source-code';
+    p.textContent = tex;
+    let feedbackTimer;
+    copy.onclick = async () => {
+      clearTimeout(feedbackTimer);
+      copy.disabled = true;
+      try {
+        await copySource(tex, p);
+        copy.textContent = '已复制';
+      } catch {
+        copy.textContent = '复制失败，请重试';
+      } finally {
+        copy.disabled = false;
+        feedbackTimer = setTimeout(() => { copy.textContent = '复制'; }, 2000);
+      }
+    };
+    d.append(h, p);
+    b.append(d);
+    b.onclick = e => { if (e.target === b) closeSource(); };
+    document.documentElement.append(b);
+    sourceDialog = b;
+  }
+  function closeSource(){if(sourceDialog){sourceDialog.remove();sourceDialog=null}}
   function showFormulaMenu(event) {
     if (event.defaultPrevented) return;
     const formulas = collectMath();
@@ -400,6 +468,13 @@
   window.addEventListener('copy', event => {
     const clipboard = event.clipboardData;
     if (!clipboard) return;
+    // 源码窗口的复制保持原文，不进入网页选区的公式格式化流程。
+    if (sourceCopyText !== null) {
+      clipboard.setData('text/plain', sourceCopyText);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     const setData = clipboard.setData;
     const descriptor = Object.getOwnPropertyDescriptor(clipboard, 'setData');
     let selection, formattedText;
